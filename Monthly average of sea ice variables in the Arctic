@@ -1,0 +1,81 @@
+import os
+import numpy as np
+import pandas as pd
+import xarray as xr
+
+# Define input and output file paths (modify as needed)
+input_dir = 'path/to/your/input/data'  # Directory containing the NetCDF files
+output_dir = 'path/to/your/output/directory'  # Directory to save the climatology results
+coords_file = 'path/to/your/coordinates/file.nc'  # Coordinates file (NetCDF with latitude/longitude)
+
+# Ensure the output directory exists
+os.makedirs(output_dir, exist_ok=True)
+
+# Load the coordinates dataset
+try:
+    ds_coords = xr.open_dataset(coords_file)
+    lat = ds_coords['nav_lat'].values  # Latitude values
+except Exception as e:
+    print(f"Error loading coordinates file: {e}")
+    exit(1)
+
+# Create arrays to store monthly means for the variables
+monthly_fswthru = np.zeros((12,))  # Solar radiation through the ice
+monthly_congel = np.zeros((12,))   # Ice freeze
+count_months = np.zeros((12,))     # Count of months for averaging
+
+# Iterate over the monthly files (1991-2005 in this case)
+for year in range(1991, 2006):
+    for month in range(1, 13):
+        # Construct the file path for the current month
+        file_path = os.path.join(input_dir, f'data_file_{year}-{month:02d}.nc')  # Adjust filename pattern
+        
+        # Check if the file exists
+        if not os.path.exists(file_path):
+            print(f"File not found: {file_path}")
+            continue
+        
+        # Load the dataset
+        try:
+            ds = xr.open_dataset(file_path)
+        except Exception as e:
+            print(f"Error loading dataset {file_path}: {e}")
+            continue
+        
+        # Extract the variables (update these based on your dataset)
+        try:
+            fswthru = ds['fswthru'].values[0, :, :]  # Solar radiation through the ice
+            congel = ds['congel'].values[0, :, :]    # Ice freeze
+        except KeyError as e:
+            print(f"Variable not found in {file_path}: {e}")
+            continue
+        
+        # Create a mask for latitudes greater than or equal to 60° (Arctic region)
+        mask = lat >= 60
+        
+        # Calculate the mean for the region of interest and add to the array
+        monthly_fswthru[month - 1] += np.nanmean(np.where(mask, fswthru, np.nan))
+        monthly_congel[month - 1] += np.nanmean(np.where(mask, congel, np.nan))
+        count_months[month - 1] += 1  # Increment month counter
+
+# Calculate the mean for each month
+monthly_fswthru /= count_months
+monthly_congel /= count_months
+
+# Create an xarray dataset for the output
+ds_output = xr.Dataset(
+    {
+        'fswthru': ('time', monthly_fswthru),
+        'congel': ('time', monthly_congel),
+    },
+    coords={
+        'time': pd.date_range(start='1991-01-01', periods=12, freq='M')  # Monthly time intervals
+    }
+)
+
+# Save the dataset to a NetCDF file
+output_file = os.path.join(output_dir, 'climatology_1991_2005.nc')  # Output file name (change as needed)
+ds_output.to_netcdf(output_file)
+
+# Print success message
+print(f"File saved as {output_file}")

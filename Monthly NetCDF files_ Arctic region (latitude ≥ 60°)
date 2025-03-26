@@ -1,0 +1,99 @@
+import os
+import numpy as np
+import pandas as pd
+import xarray as xr
+
+# Define input and output file paths (modify as needed)
+input_dir = 'path/to/your/input/data'  # Directory containing the NetCDF files
+output_dir = 'path/to/your/output/directory'  # Directory to save the results
+coords_file = 'path/to/your/coordinates/file.nc'  # Coordinates file (NetCDF with latitude/longitude)
+
+# Ensure the output directory exists
+os.makedirs(output_dir, exist_ok=True)
+
+# Load the coordinates dataset
+try:
+    ds_coords = xr.open_dataset(coords_file)
+    lon = ds_coords['nav_lon'].values  # Longitude values
+    lat = ds_coords['nav_lat'].values  # Latitude values
+except Exception as e:
+    print(f"Error loading coordinates file: {e}")
+    exit(1)
+
+# Dictionary to store the mean values of variables
+mean_values = {
+    'variable1': [],  # Placeholder for variable 1 (e.g., fswthru)
+    'variable2': [],  # Placeholder for variable 2 (e.g., congel)
+}
+
+# Counter for processed files
+num_files_processed = 0
+
+# Iterate over the files for the given period (customizable)
+start_year = 1975
+end_year = 2005
+
+for year in range(start_year, end_year + 1):
+    for month in range(1, 13):
+        # Construct the file path for the current month
+        file_path = os.path.join(input_dir, f'data_file_{year}-{month:02d}.nc')  # Change the filename pattern accordingly
+        
+        # Check if the file exists
+        if not os.path.exists(file_path):
+            print(f"File not found: {file_path}")
+            continue
+        
+        # Load the dataset for the current month
+        try:
+            ds = xr.open_dataset(file_path)
+        except Exception as e:
+            print(f"Error loading dataset {file_path}: {e}")
+            continue
+        
+        # Extract the variables (update these based on your dataset)
+        try:
+            variable1 = ds['variable1'].values[0, :, :]  # Replace 'variable1' with the actual variable name
+            variable2 = ds['variable2'].values[0, :, :]  # Replace 'variable2' with the actual variable name
+        except KeyError as e:
+            print(f"Variable not found in {file_path}: {e}")
+            continue
+        
+        # Create a mask for latitudes greater than or equal to 60° (Arctic region)
+        mask = lat >= 60
+        
+        # Calculate the mean for the region of interest and add to the dictionary
+        mean_values['variable1'].append(np.nanmean(np.where(mask, variable1, np.nan)))
+        mean_values['variable2'].append(np.nanmean(np.where(mask, variable2, np.nan)))
+        
+        # Increment the counter for processed files
+        num_files_processed += 1
+
+# Create a time range (monthly from start_year to end_year)
+times = pd.date_range(start=f'{start_year}-01-01', end=f'{end_year}-12-31', freq='M')
+
+# Ensure the length of each variable matches the length of the time range
+for var_name, values in mean_values.items():
+    if len(values) != len(times):
+        raise ValueError(f"Mismatch in the length of {var_name} data.")
+
+# Convert the lists to arrays
+mean_values = {var_name: np.array(values) for var_name, values in mean_values.items()}
+
+# Create an xarray dataset for the output
+ds_output = xr.Dataset(
+    {
+        'variable1': ('time', mean_values['variable1']),
+        'variable2': ('time', mean_values['variable2']),
+    },
+    coords={
+        'time': times
+    }
+)
+
+# Save the output dataset to a NetCDF file
+output_file = os.path.join(output_dir, 'output_data.nc')  # Adjust the output filename
+ds_output.to_netcdf(output_file)
+
+# Print success message
+print(f"File saved as {output_file}")
+print(f"Number of files processed: {num_files_processed}")
